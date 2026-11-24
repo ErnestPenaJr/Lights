@@ -57,11 +57,11 @@ function handle(string $a, array $in, HaoDeng $cloud, array $st, int $place, boo
             return ['places' => array_column($cloud->places, 'name'), 'place' => $both ? 'all' : $place, 'lights' => $lights, 'allLights' => $allLights,
                 'scenes' => array_values(array_filter($st['scenes'], fn($s) => $both || ($s['scope'] ?? 'place') === 'all' || (int)$s['place'] === $place)),
                 'playing' => $run && ($both || in_array($place, $run['places'] ?? [(int)$run['place']])) ? $run : null,
-                'plan' => $st['plan'] ?: null, 'permanent' => store_permanent(), 'statusError' => $statusError, 'jobs' => jobs_pending()];
+                'plan' => $st['plan'] ?: null, 'permanent' => store_permanent(), 'statusError' => $statusError, 'jobs' => jobs_pending(), 'now' => microtime(true)];
 
         case 'playing': // cheap poll while a scene starts or a reset runs (no status request to the bridges)
             $run = run_load();
-            return ['playing' => $run && ($both || in_array($place, $run['places'] ?? [(int)$run['place']])) ? $run : null, 'jobs' => jobs_pending()];
+            return ['playing' => $run && ($both || in_array($place, $run['places'] ?? [(int)$run['place']])) ? $run : null, 'jobs' => jobs_pending(), 'now' => microtime(true)];
 
         case 'cmd': // a background job sends it, checks the light(s) answered, and re-sends to any that missed (see ensure.php)
             if ($in['addr'] === 'all') { // every light in the area(s)

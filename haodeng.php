@@ -173,6 +173,115 @@ function mqtt_collect(string $host, string $user, string $pass, string $subTopic
     fclose($s);
 }
 
+// ---- paced link: the way patterns talk to a bridge ----
+
+const HD_GAP = 0.15; // seconds between two commands to one bridge, send to send (~6.7/s; the cloud drops more near 10/s)
+
+/** One long-lived MQTT connection to a place's bridge. send() never waits for the broker's reply (that cost a 62 ms round
+ *  trip per command before), it keeps commands exactly $gap apart on a steady clock, reopens a dead socket, and pings an idle link. */
+class HdLink {
+    private $s = null;
+    private string $topic = '';
+    private int $id = 0;
+    private float $next = 0, $last = 0;
+    public int $sent = 0, $reconnects = 0;
+
+    public function __construct(private HaoDeng $cloud, private int $place, private float $gap = HD_GAP) { $this->connect(); }
+
+    private function connect(): void {
+        if (is_resource($this->s)) @fclose($this->s);
+        for ($try = 0; ; $try++) {
+            try {
+                [$this->s, $this->topic] = $this->cloud->open($this->place);
+                stream_set_blocking($this->s, false);
+                $this->last = microtime(true);
+                return;
+            } catch (Throwable $e) {
+                if ($try >= 4) throw $e;
+                usleep((int)(500000 * 2 ** $try)); // 0.5, 1, 2, 4 s
+            }
+        }
+    }
+
+    private function write(string $pkt): bool {
+        if (!is_resource($this->s)) return false;
+        for ($tries = 0; $pkt !== '' && $tries < 50; $tries++) {
+            $n = @fwrite($this->s, $pkt);
+            if ($n === false || feof($this->s)) return false;
+            $pkt = substr($pkt, $n);
+            if ($pkt !== '') usleep(2000);
+        }
+        return $pkt === '';
+    }
+
+    /** Read and drop what the broker sent (PUBACKs, ping replies). Returns false when the socket is closed. */
+    private function drain(): bool {
+        if (!is_resource($this->s)) return false;
+        while (($b = @fread($this->s, 8192)) !== false && $b !== '') {}
+        return !feof($this->s);
+    }
+
+    /** When the next command may go out (microtime). */
+    public function readyAt(): float { return $this->next; }
+
+    public function send(array $payload): void {
+        $wait = $this->next - microtime(true);
+        if ($wait > 0) usleep((int)($wait * 1e6));
+        $t = microtime(true);
+        $this->id = $this->id % 65535 + 1;
+        $pkt = mqtt_publish_packet($this->topic, json_encode($payload), $this->id);
+        if (!$this->drain() || !$this->write($pkt)) { $this->reconnects++; $this->connect(); $this->write($pkt); }
+        $this->sent++;
+        $this->last = $t;
+        $this->next = $t + $this->gap;
+    }
+
+    /** Call while waiting: drops replies, keeps the connection alive (keepalive is 60 s). */
+    public function idle(): void {
+        if (!$this->drain()) { $this->reconnects++; $this->connect(); return; }
+        if (microtime(true) - $this->last > 25) { $this->write("\xC0\x00"); $this->last = microtime(true); }
+    }
+
+    public function close(): void {
+        if (!is_resource($this->s)) return;
+        @fwrite($this->s, "\xE0\x00"); @fclose($this->s); $this->s = null;
+    }
+}
+
+// ---- pattern timing (pure; index.php simAt mirrors it, test.php checks it) ----
+
+/** Step length for an effect, in seconds. Steps run on a fixed clock: step k starts at k * dt after "running".
+ *  $P = the speed's period, $K = lanes, $n = places. Each step leaves room for its commands plus a 0.1 s margin.
+ *  Returns [dt, m] where m = in-between colors per change (fade) or levels per breath (breathe). */
+function hd_fx_timing(string $effect, float $P, int $K, int $n): array {
+    $burst = fn(int $cmds) => $cmds * HD_GAP + 0.1;
+    switch ($effect) {
+        case 'blink': return [max($P, $burst($n)), 1];
+        case 'breathe': $cyc = 2.5 * $P; $m = max(10, min(24, (int)round($cyc / 0.3))); return [max($cyc / $m, $burst($n)), $m];
+        case 'rotate': return [max($P, $burst($K * $n)), 1];
+        case 'fade': $c = $K * $n * HD_GAP + 0.15; $m = max(1, min(6, (int)floor($P / $c))); return [max($P / $m, $c), $m];
+        case 'twinkle': return [$P / 2 + max(0.35, $P / 3), 1]; // one twinkle; the dip starts at P/2 into it
+        case 'rainbow': return [max($P / 6, $burst($n), 0.35), 1]; // 10 degrees of hue per step
+    }
+    return [$P, 1];
+}
+
+/** 32-bit hash (same bits as index.php mix32), used to pick twinkle lights so the page shows the same light as the yard. */
+function hd_mix32(int $i): int {
+    $imul = fn(int $a, int $b): int => (($a * ($b & 0xFFFF)) + ((($a * ($b >> 16)) & 0xFFFF) << 16)) & 0xFFFFFFFF;
+    $x = $imul(($i & 0xFFFFFFFF) ^ 0x9E3779B9, 0x85EBCA6B);
+    $x ^= $x >> 13;
+    $x = $imul($x, 0xC2B2AE35);
+    return ($x ^ ($x >> 16)) & 0xFFFFFFFF;
+}
+
+/** Which of $N lights dips in twinkle number $c (never the same as the one picked for $c - 1 by this rule). */
+function hd_twinkle_pick(int $c, int $N): int {
+    $a = hd_mix32($c) % $N;
+    if ($N > 1 && $a === hd_mix32($c - 1) % $N) $a = ($a + 1) % $N;
+    return $a;
+}
+
 // ---- cloud ----
 
 class HaoDeng {
@@ -247,19 +356,13 @@ class HaoDeng {
         return [$s, "/{$sw['productKey']}/{$sw['deviceName']}/control"];
     }
 
-    /** Send several payloads on one connection, $gap seconds apart. ~10/s is the cloud's comfortable limit. */
-    public function sendMany(int $place, array $payloads, float $gap = 0.12): void {
-        [$s, $topic] = $this->open($place);
-        $id = 1;
-        foreach ($payloads as $p) {
-            mqtt_pub($s, $topic, json_encode($p), $id++);
-            if ($gap > 0 && $id <= count($payloads)) usleep((int)($gap * 1e6));
-        }
-        fwrite($s, "\xE0\x00");
-        fclose($s);
+    /** Send several payloads on one connection, $gap seconds apart (send to send). ~7/s is the cloud's comfortable limit. */
+    public function sendMany(int $place, array $payloads, float $gap = HD_GAP): void {
+        $link = new HdLink($this, $place, $gap);
+        foreach ($payloads as $p) $link->send($p);
+        $link->close();
     }
 
-    /** Blink one light so you can find it outside. Ends in the state it started in. */
     public function identify(int $place, int $addr, int $ct, bool $wasOn = true): void {
         [$s, $topic] = $this->open($place);
         $seq = [];

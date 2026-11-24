@@ -24,9 +24,9 @@ function store_save(array $st): void {
 }
 
 /** Runner progress shown in the page: phase text + percent. Ignored if the run was replaced meanwhile. */
-function run_progress(string $token, string $phase, int $pct): void {
+function run_progress(string $token, string $phase, int $pct, array $extra = []): void {
     $r = run_load();
-    if ($r && $r['token'] === $token) { $r['phase'] = $phase; $r['pct'] = max(0, min(100, $pct)); run_save($r); }
+    if ($r && $r['token'] === $token) { $r = ['phase' => $phase, 'pct' => max(0, min(100, $pct))] + $extra + $r; run_save($r); }
 }
 
 /** Runner state: what pattern is playing. Missing file = nothing playing. */

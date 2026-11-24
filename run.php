@@ -62,10 +62,10 @@ run_progress($token, 'Connecting', 2);
 $allAddrs = [];
 foreach ($byPlace as $p => $_) $allAddrs[$p] = array_map(fn($d) => (int)$d['meshAddress'], $cloud->places[$p]['devices']);
 
-// one MQTT connection per place
-$conn = []; $ids = [];
-foreach (array_keys($byPlace) as $p) { $conn[$p] = $cloud->open($p); $ids[$p] = 1; }
-$pub = function (int $p, array $payload) use ($conn, &$ids) { mqtt_pub($conn[$p][0], $conn[$p][1], json_encode($payload), $ids[$p]++); usleep(120000); };
+// one paced, long-lived link per place (see HdLink: no waiting for broker replies, steady spacing, reconnects)
+$link = [];
+foreach (array_keys($byPlace) as $p) $link[$p] = new HdLink($cloud, $p);
+$pub = function (int $p, array $payload) use ($link) { $link[$p]->send($payload); };
 $broadcast = function (array $payload) use ($byPlace, $pub) { foreach (array_keys($byPlace) as $p) $pub($p, $payload); };
 
 // ---- setup: put every light of lane i into mesh group HD_LANE_GROUP+i (only when the layout changed; the bridge chokes on long bursts)
@@ -117,57 +117,63 @@ for ($round = 0; $round < 3; $round++) {
     }
     if (!$missing) break;
 }
-run_progress($token, 'running', 100);
 $period = 0.5 + (10 - $scene['speed']) * 0.35; // seconds per step: 0.5 (fast) .. 3.65 (slow)
-$sleep = function (float $sec) use ($alive): bool { // sleep in small slices so stop is quick; the last slice is exact
-    for ($t = 0; $t < $sec - 0.001; $t += 0.25) { if (!$alive()) return false; usleep((int)(min(0.25, $sec - $t) * 1e6)); }
+[$dt, $m] = hd_fx_timing($scene['effect'], $period, $K, count($byPlace));
+$t0 = microtime(true) + 0.3;
+run_progress($token, 'running', 100, ['t0' => round($t0, 3)]); // the page runs its preview on this same clock
+/** Wait until $t seconds after t0, in small slices: stop stays quick and the links stay alive. Steps never drift:
+ *  if sending ran late, the next step simply starts on time (or at once). */
+$at = function (float $t) use ($alive, $t0, $link): bool {
+    while (($left = $t0 + $t - microtime(true)) > 0.001) {
+        if (!$alive()) return false;
+        foreach ($link as $l) $l->idle();
+        usleep((int)(min(0.25, $left) * 1e6));
+    }
     return $alive();
 };
-$sceneLights = []; foreach ($byPlace as $p => $laneAddrs) foreach ($laneAddrs as $addrs) foreach ($addrs as $a) $sceneLights[] = [$p, $a];
+$sceneLights = []; // in lane order, the same order index.php uses, so the page shows the same twinkle
+foreach ($lanes as $i => $l) foreach ($l['lights'] as $key) {
+    [$p, $a] = is_int($key) || ctype_digit((string)$key) ? [(int)$scene['place'], (int)$key] : array_map('intval', explode('-', $key));
+    if (isset($byPlace[$p])) $sceneLights[] = [$p, $a];
+}
 
 switch ($scene['effect']) {
     case 'static':
         break;
-    case 'blink':
-        while ($sleep($period)) { $broadcast(hd_payload_off(HD_ALL, $ct)); if (!$sleep($period)) break; $broadcast(hd_payload_on(HD_ALL, $ct)); }
+    case 'blink': // step k: odd = off, even = on
+        for ($k = 1; $at($k * $dt); $k++) $broadcast($k % 2 ? hd_payload_off(HD_ALL, $ct) : hd_payload_on(HD_ALL, $ct));
         break;
-    case 'breathe': // one breath = 2.5 steps; slow speeds get more, smaller steps (a smooth curve, never more than ~3 broadcasts/s)
-        $cycle = 2.5 * $period; $n = max(10, min(24, (int)round($cycle / 0.3)));
-        $levels = hd_breathe_levels($n);
-        for ($i = 0; $sleep($cycle / $n); $i++) $broadcast(hd_payload_brightness(HD_ALL, $ct, $levels[$i % $n]));
+    case 'breathe': // one breath = m steps along a cosine curve
+        $levels = hd_breathe_levels($m);
+        for ($k = 1; $at($k * $dt); $k++) $broadcast(hd_payload_brightness(HD_ALL, $ct, $levels[$k % $m]));
         break;
     case 'rotate': // each lane takes the next lane's color every step (alternating for 2 lanes, chase for more)
-        for ($t = 1; $sleep($period); $t++) $paint(array_map(fn($i) => $colors[($i + $t) % $K], array_keys($lanes)));
+        for ($k = 1; $at($k * $dt); $k++) $paint(array_map(fn($i) => $colors[($i + $k) % $K], array_keys($lanes)));
         break;
-    case 'fade': // like rotate, but each lane glides to the next color in a few in-between steps (as many as the bridge allows)
-        $m = max(1, min(4, (int)floor($period / (0.12 * $K * count($byPlace) + 0.15))));
-        for ($t = 1; ; $t++) {
-            for ($s = 1; $s <= $m; $s++) {
-                if (!$sleep($period / $m)) break 2;
-                $paint(array_map(fn($i) => hd_mix_hex($colors[($i + $t - 1) % $K], $colors[($i + $t) % $K], $s / $m), array_keys($lanes)));
-            }
+    case 'fade': // like rotate, but each lane glides to the next color in m in-between steps round the color wheel
+        for ($k = 1; $at($k * $dt); $k++) {
+            [$tt, $s] = [intdiv($k, $m), $k % $m];
+            $paint(array_map(fn($i) => hd_mix_hex($colors[($i + $tt) % $K], $colors[($i + $tt + 1) % $K], $s / $m), array_keys($lanes)));
         }
         break;
-    case 'twinkle': // a random light dips and comes back. The come-back goes twice, then once more a step later: a far light drops 1 in 3
-        $prev = null;
-        while ($sleep($period / 2)) {
-            do { [$p, $a] = $sceneLights[array_rand($sceneLights)]; } while (count($sceneLights) > 1 && $prev === [$p, $a]); // never the same light twice in a row
-            if ($prev) $pub($prev[0], hd_payload_brightness($prev[1], $ct, 100));
+    case 'twinkle': // twinkle c: at c*dt + P/2 one light dips; at (c+1)*dt it comes back (twice: a far light drops 1 in 3)
+        $N = count($sceneLights); $prev = null;
+        for ($c = 0; $at($c * $dt + $period / 2); $c++) {
+            [$p, $a] = $sceneLights[hd_twinkle_pick($c, $N)];
             $pub($p, hd_payload_brightness($a, $ct, 5));
-            if (!$sleep(max(0.3, $period / 3))) break;
+            if (!$at(($c + 1) * $dt)) break;
             $pub($p, hd_payload_brightness($a, $ct, 100)); $pub($p, hd_payload_brightness($a, $ct, 100));
-            $prev = [$p, $a];
         }
         break;
-    case 'rainbow': // every light cycles through the hues together
-        for ($h = 0; $sleep($period / 3); $h = ($h + 20) % 360) {
-            $x = 1 - abs(fmod($h / 60, 2) - 1); $c = 255; $m = (int)($c * $x);
-            [$r, $g, $b] = [[$c, $m, 0], [$m, $c, 0], [0, $c, $m], [0, $m, $c], [$m, 0, $c], [$c, 0, $m]][intdiv($h, 60) % 6];
+    case 'rainbow': // every light steps 10 degrees round the color wheel each step
+        for ($k = 1; $at($k * $dt); $k++) {
+            $h = ($k * 10) % 360; $x = 1 - abs(fmod($h / 60, 2) - 1); $c = 255; $mm = (int)round($c * $x);
+            [$r, $g, $b] = [[$c, $mm, 0], [$mm, $c, 0], [0, $c, $mm], [0, $mm, $c], [$mm, 0, $c], [$c, 0, $mm]][intdiv($h, 60) % 6];
             $broadcast(hd_payload_rgb(HD_ALL, $ct, sprintf('%02x%02x%02x', $r, $g, $b)));
         }
         break;
 }
-foreach ($conn as [$s, $_]) { fwrite($s, "\xE0\x00"); fclose($s); }
+foreach ($link as $l) $l->close();
 $r = run_load();
 if ($scene['effect'] === 'static') { if ($r && $r['token'] === $token) run_save(null); } // still scene: painted once, stays that way
 elseif ($r && $r['token'] === $token) { // ran out the 12 h clock on our own (a user Stop is handled by api.php): back to the everyday look

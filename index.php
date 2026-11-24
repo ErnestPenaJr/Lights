@@ -231,22 +231,23 @@ select.place{appearance:none;-webkit-appearance:none;border:0;background:none;pa
 
 /* ---- the plan: a top-down blueprint of the property; each light sits where it is on the house.
    Pools are flat circles that show where the light lands; they add up where they overlap (screen blend). */
-.plan{position:relative;aspect-ratio:4/3;border-radius:var(--r-lg);overflow:hidden;background:var(--plan-bg);border:1px solid var(--line);container-type:inline-size;user-select:none;-webkit-user-select:none}
+.plan{position:relative;aspect-ratio:87/116;width:min(100%,calc((100dvh - 150px) * 87 / 116));margin-inline:auto;border-radius:var(--r-lg);overflow:hidden;background:var(--plan-bg);border:1px solid var(--line);container-type:inline-size;user-select:none;-webkit-user-select:none}
 .plan-svg{position:absolute;inset:0;width:100%;height:100%;display:block}
 .plan-svg *{vector-effect:non-scaling-stroke}
 .plan-svg .g1{fill:none;stroke:var(--plan-grid);stroke-width:1}
 .plan-svg .g2{fill:none;stroke:var(--plan-grid-2);stroke-width:1}
 .plan-svg .lot{fill:none;stroke:var(--plan-ink-2);stroke-width:1;stroke-dasharray:6 5}
-.plan-svg .street{stroke:var(--plan-ink-2);stroke-width:1.5;stroke-dasharray:16 10}
+.plan-svg .pave{fill:var(--plan-grid);stroke:var(--plan-ink-2);stroke-width:1}
+.plan-svg .edge{stroke:var(--plan-ink-2);stroke-width:1}
+.plan-svg .road{fill:var(--plan-house);stroke:none}
 .plan-svg .wall{fill:var(--plan-house);stroke:var(--plan-ink);stroke-width:1.5}
-.plan-svg .wall-in{fill:none;stroke:var(--plan-ink);stroke-width:1;opacity:.45}
-.plan-svg .cut{fill:var(--plan-house);stroke:none}
-.plan-svg .door{fill:none;stroke:var(--plan-ink);stroke-width:1;opacity:.8}
-.plan-svg .door.arc{stroke-dasharray:3 3;opacity:.6}
+.plan-svg .roof{fill:none;stroke:var(--plan-ink);stroke-width:1;opacity:.45}
+.plan-svg .garage{fill:none;stroke:var(--plan-ink);stroke-width:1;stroke-dasharray:4 3;opacity:.6}
 .tag{position:absolute;transform:translate(-50%,-50%);font:600 10px/1 var(--mono);letter-spacing:.18em;color:var(--plan-ink);text-transform:uppercase;pointer-events:none;white-space:nowrap;opacity:.75}
+.tag.dim{opacity:.45;font-size:9px;letter-spacing:.12em}
 .tag.l{transform:translate(0,-50%)}
 .pools{position:absolute;inset:0;pointer-events:none}
-.pool{position:absolute;width:clamp(30px,9cqw,68px);height:clamp(30px,9cqw,68px);border-radius:50%;transform:translate(-50%,-50%);background:var(--c);opacity:calc(var(--b) * .3);mix-blend-mode:screen;transition:opacity 160ms ease,background-color 160ms ease}
+.pool{position:absolute;width:clamp(24px,7cqw,52px);height:clamp(24px,7cqw,52px);border-radius:50%;transform:translate(-50%,-50%);background:var(--c);opacity:calc(var(--b) * .3);mix-blend-mode:screen;transition:opacity 160ms ease,background-color 160ms ease}
 .pool.off,.pool.out:not(.lit),.pool.other,.pool.nolink{opacity:0}
 .fx{position:absolute;width:32px;height:32px;transform:translate(-50%,-50%);display:grid;place-items:center;border-radius:50%;--c:#ffc070;--b:1}
 .fx .bulb{width:14px;height:14px;border-radius:50%;background:color-mix(in srgb,var(--c) calc(var(--b) * 100%),var(--plan-bg));box-shadow:0 0 0 2px var(--plan-bg),0 0 0 3.5px var(--plan-ink);transition:background-color 160ms ease,transform 160ms var(--ease)}
@@ -267,8 +268,6 @@ select.place{appearance:none;-webkit-appearance:none;border:0;background:none;pa
 .plan.layout .fx.drag .bulb{transform:scale(1.25)}
 .plan.layout .fx.other{pointer-events:auto;opacity:1}
 .plan.layout .fx.other .bulb{width:14px;height:14px}
-.hnd{position:absolute;width:32px;height:32px;transform:translate(-50%,-50%);display:grid;place-items:center;cursor:nwse-resize;z-index:2}
-.hnd::after{content:"";width:12px;height:12px;background:var(--plan-bg);border:2px solid var(--accent);border-radius:3px}
 .plan-cap{display:flex;align-items:center;gap:var(--sp-2);font-size:13px;color:var(--fg-3);margin:var(--sp-2) 2px 0;min-height:20px}
 .plan-cap .live{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:none;animation:beat 1.6s ease-in-out infinite}
 @keyframes beat{50%{opacity:.35}}
@@ -301,6 +300,7 @@ select.place{appearance:none;-webkit-appearance:none;border:0;background:none;pa
   main{padding:var(--sp-6) 40px 40px}
   select.place{font-size:30px}
   .grid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
+  .plan{width:min(100%,calc((100dvh - 240px) * 87 / 116))}
   .home-top{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,1fr);gap:var(--sp-6);align-items:start}
   .home-top .h2row:first-child,.h2row.first-desk{margin-top:4px}
   .all{margin-bottom:0}
@@ -400,10 +400,12 @@ let layout = null, planNames = store.get('planNames') === '1', preview = {on: !R
 const BOTH = () => place === 'all';
 
 // ---- data
+let clockSkew = 0;
 async function api(a, body) {
   const r = body ? await fetch('api.php', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({a, place, ...body})})
                  : await fetch(`api.php?a=${a}&place=${place}`);
   const j = await r.json();
+  if (j.now) clockSkew = j.now - Date.now() / 1000; // NAS clock minus ours: keeps the plan in step with the runner
   if (j.error) { toast('Error: ' + j.error, true); throw new Error(j.error); }
   return j;
 }
@@ -481,7 +483,7 @@ function mixHex(a, b, t) {
 }
 const breatheLevels = n => Array.from({length: n}, (_, i) => Math.round(5 + 95 * (1 + Math.cos(2 * Math.PI * i / n)) / 2));
 function hueHex(h) { // run.php's rainbow step
-  const x = 1 - Math.abs((h / 60) % 2 - 1), m = Math.floor(255 * x) / 255;
+  const x = 1 - Math.abs((h / 60) % 2 - 1), m = Math.round(255 * x) / 255;
   return toHex([[1, m, 0], [m, 1, 0], [0, 1, m], [0, m, 1], [m, 0, 1], [1, 0, m]][Math.floor(h / 60) % 6]);
 }
 function cssHex(st) { // a light's own look as RRGGBB, for the plan
@@ -492,36 +494,45 @@ function cssHex(st) { // a light's own look as RRGGBB, for the plan
   return toHex([[1, u, p], [q, 1, p], [p, 1, u], [p, q, 1], [u, p, 1], [1, p, q]][Math.floor(h) % 6]);
 }
 
-// ---- effect simulation: what run.php sends, step by step, as a function of time (seconds). Mirrors its timing,
-// including the 0.12 s gap after every MQTT publish, so the preview's rhythm is the real one.
-const PUB = 0.12, period = sp => 0.5 + (10 - sp) * 0.35;
+// ---- effect simulation: what run.php sends, step by step, as a function of time (seconds since the run's t0).
+// Steps run on a fixed clock, so fxTiming must equal haodeng.php hd_fx_timing (HD_GAP = 0.15 s between commands).
+const GAP = 0.15, period = sp => 0.5 + (10 - sp) * 0.35;
+function fxTiming(effect, P, K, n) { // -> [dt, m]
+  const burst = c => c * GAP + .1;
+  if (effect === 'blink') return [Math.max(P, burst(n)), 1];
+  if (effect === 'breathe') { const cyc = 2.5 * P, m = clamp(Math.round(cyc / .3), 10, 24); return [Math.max(cyc / m, burst(n)), m]; }
+  if (effect === 'rotate') return [Math.max(P, burst(K * n)), 1];
+  if (effect === 'fade') { const c = K * n * GAP + .15, m = clamp(Math.floor(P / c), 1, 6); return [Math.max(P / m, c), m]; }
+  if (effect === 'twinkle') return [P / 2 + Math.max(.35, P / 3), 1];
+  if (effect === 'rainbow') return [Math.max(P / 6, burst(n), .35), 1];
+  return [P, 1];
+}
 function simOf(sc) {
+  const inScope = k => sc.scope === 'all' || +k.split('-')[0] === +sc.place;
   const lanes = sc.lanes.filter(l => l.lights.length);
   if (!lanes.length) return null;
   const laneOf = {};
-  lanes.forEach((l, i) => l.lights.forEach(k => laneOf[typeof k === 'number' ? `${sc.place}-${k}` : k] = i));
+  lanes.forEach((l, i) => l.lights.forEach(k => { k = typeof k === 'number' ? `${sc.place}-${k}` : k; if (inScope(k)) laneOf[k] = i; }));
   const keys = Object.keys(laneOf), places = [...new Set(keys.map(k => +k.split('-')[0]))];
+  if (!keys.length) return null;
   const wide = ['blink', 'breathe', 'rainbow'].includes(sc.effect) ? places.flatMap(p => (S.allLights[p] || []).map(l => l.key)) : [];
-  return {effect: sc.effect, colors: lanes.map(l => l.color), laneOf, keys, wide, n: places.length, P: period(sc.speed), K: lanes.length};
+  const P = period(sc.speed), K = lanes.length, [dt, m] = fxTiming(sc.effect, P, K, places.length);
+  return {effect: sc.effect, colors: lanes.map(l => l.color), laneOf, keys, wide, P, K, dt, m};
 }
 function mix32(i) { let x = Math.imul(i ^ 0x9e3779b9, 0x85ebca6b); x ^= x >>> 13; x = Math.imul(x, 0xc2b2ae35); return (x ^ (x >>> 16)) >>> 0; }
 function simAt(sim, t) { // -> {key: [hex or null (= its own color), brightness 0..1]}
-  const {effect, colors, laneOf, keys, wide, n, P, K} = sim, out = {};
-  keys.forEach(k => out[k] = [colors[laneOf[k]], 1]);
-  wide.forEach(k => { if (!out[k]) out[k] = [null, 1]; });
-  if (effect === 'blink') { const on = Math.floor(t / (P + n * PUB)) % 2 === 0; for (const k in out) out[k][1] = on ? 1 : 0; }
-  if (effect === 'breathe') { const cyc = 2.5 * P, m = clamp(Math.round(cyc / .3), 10, 24), lv = breatheLevels(m)[Math.floor(t / (cyc / m + n * PUB)) % m]; for (const k in out) out[k][1] = lv / 100; }
-  if (effect === 'rotate') { const s = Math.floor(t / (P + K * n * PUB)); keys.forEach(k => out[k][0] = colors[(laneOf[k] + s) % K]); }
-  if (effect === 'fade') {
-    const m = clamp(Math.floor(P / (PUB * K * n + .15)), 1, 4), g = Math.floor(t / (P / m + K * n * PUB)), tt = Math.floor(g / m), s = g % m;
-    keys.forEach(k => { const i = laneOf[k]; out[k][0] = mixHex(colors[(i + tt) % K], colors[(i + tt + 1) % K], s / m); });
+  const {effect, colors, laneOf, keys, wide, P, K, dt, m} = sim, out = {}, k = Math.max(0, Math.floor(t / dt));
+  keys.forEach(x => out[x] = [colors[laneOf[x]], 1]);
+  wide.forEach(x => { if (!out[x]) out[x] = [null, 1]; });
+  if (effect === 'blink') { const on = k % 2 === 0; for (const x in out) out[x][1] = on ? 1 : 0; }
+  if (effect === 'breathe') { const lv = breatheLevels(m)[k % m]; for (const x in out) out[x][1] = lv / 100; }
+  if (effect === 'rotate') keys.forEach(x => out[x][0] = colors[(laneOf[x] + k) % K]);
+  if (effect === 'fade') { const tt = Math.floor(k / m), s = k % m; keys.forEach(x => { const i = laneOf[x]; out[x][0] = mixHex(colors[(i + tt) % K], colors[(i + tt + 1) % K], s / m); }); }
+  if (effect === 'twinkle' && t >= 0) { // twinkle k: the light dips P/2 into it and comes back at its end
+    const N = keys.length; let a = mix32(k) % N; if (N > 1 && a === mix32(k - 1) % N) a = (a + 1) % N; // = hd_twinkle_pick
+    if (t - k * dt >= P / 2) out[keys[a]][1] = .05;
   }
-  if (effect === 'twinkle') {
-    const d = Math.max(.3, P / 3), C = P / 2 + d + 4 * PUB, c = Math.floor(t / C), w = t - c * C, N = keys.length;
-    let a = mix32(c) % N; if (N > 1 && a === mix32(c - 1) % N) a = (a + 1) % N; // never the same light twice in a row
-    if (w >= P / 2 + 2 * PUB && w < P / 2 + 3 * PUB + d) out[keys[a]][1] = .05;
-  }
-  if (effect === 'rainbow') { const hex = hueHex((Math.floor(t / (P / 3 + n * PUB)) * 20) % 360); for (const k in out) out[k][0] = hex; }
+  if (effect === 'rainbow' && k > 0) { const hex = hueHex((k * 10) % 360); for (const x in out) out[x][0] = hex; }
   return out;
 }
 // what the plan should animate right now: the scene being edited (preview), or the scene playing on the lights
@@ -534,7 +545,8 @@ function simSource() {
   const sc = S.scenes.find(s => s.id === p.id);
   if (!sc) return null;
   if (homeRun.token !== p.token) homeRun = {token: p.token, t0: performance.now()};
-  return {sim: simOf(sc), t0: homeRun.t0};
+  // the runner's own clock (t0, NAS time) keeps the plan in step with the yard; without it, start from when we first saw it
+  return {sim: simOf(sc), t0: p.t0 ? performance.now() - (Date.now() / 1000 + clockSkew - p.t0) * 1000 : homeRun.t0};
 }
 function tick() {
   requestAnimationFrame(tick);
@@ -551,55 +563,61 @@ function tick() {
 }
 requestAnimationFrame(tick);
 
-// ---- the plan: positions are 0..1 of the plan box (4:3). Saved in store.json; until then guessed from names and order.
-function planDefault(house = [0.17, 0.27, 0.66, 0.42]) {
-  const [hx, hy, hw, hh] = house, dx = 0.045, dy = 0.06, pos = {};
-  const even = (n, a, b) => Array.from({length: n}, (_, i) => a + (b - a) * (n === 1 ? .5 : i / (n - 1)));
-  const L = hx - dx, R = hx + hw + dx, F = hy + hh + dy, T = hy + 0.04, B = hy + hh - 0.02;
-  let rowY = 0.12, uUsed = false;
+// ---- the plan: a to-scale roof plan of the property (from the satellite survey, Nov 2026). Box = 87 x 116 ft,
+// 10 SVG units per foot. Feet: x = 0 at the left (driveway) wall, y = 0 at the back eave; the house is 40 x 67 ft.
+// Positions are saved as 0..1 of the box. Until saved they are guessed from names: LS* left eave (B), FL/FC/F/FR front
+// eave (A), RS* right eave (C), an area named "Back..." in the back yard behind the back eave (D).
+const PLAN = {W: 87, H: 116, ox: 23.5, oy: 18, house: [0, 0, 40, 67], walk: 23}, FT = 10;
+const ft = (x, y) => [(x + PLAN.ox) / PLAN.W, (y + PLAN.oy) / PLAN.H];
+const svgPt = (x, y) => [(x + PLAN.ox) * FT, (y + PLAN.oy) * FT]; // feet -> SVG units
+const HOUSE = (() => { const [a, b] = ft(0, 0), [c, d] = ft(40, 67); return [a, b, c - a, d - b]; })();
+function planDefault() {
+  const pos = {}, eave = 1.5;
+  const even = (n, a, b) => Array.from({length: n}, (_, i) => a + (b - a) * (n === 1 ? .5 : (i + .5) / n));
+  let backRow = -7, uUsed = false;
   S.places.forEach((name, p) => {
     const ls = S.allLights[p] || [];
     if (!ls.length) return;
-    if (/back/i.test(name) || uUsed) { // a row along the back fence
-      even(ls.length, 0.16, 0.84).forEach((x, i) => pos[ls[i].key] = [x, rowY]); rowY += 0.06; return;
+    if (/back/i.test(name) || uUsed) { // yard lights: a row across the back yard
+      even(ls.length, 0, 40).forEach((x, i) => pos[ls[i].key] = ft(x, backRow)); backRow -= 5; return;
     }
     uUsed = true;
     const left = ls.filter(l => /^LS/i.test(l.name)), right = ls.filter(l => /^RS/i.test(l.name));
-    if (left.length || right.length) { // names say where: left side top to bottom, front left to right, right side bottom to top
+    if (left.length || right.length) { // numbered round the house: left eave back to front, front eave left to right, right eave front to back
       const front = ls.filter(l => !left.includes(l) && !right.includes(l));
-      even(left.length, T, B).forEach((y, i) => pos[left[i].key] = [L, y]);
-      even(front.length, L + 0.065, R - 0.065).forEach((x, i) => pos[front[i].key] = [x, F]);
-      even(right.length, B, T).forEach((y, i) => pos[right[i].key] = [R, y]);
+      even(left.length, 0, 67).forEach((y, i) => pos[left[i].key] = ft(-eave, y));
+      even(front.length, 0, 40).forEach((x, i) => pos[front[i].key] = ft(x, 67 + eave));
+      even(right.length, 67, 0).forEach((y, i) => pos[right[i].key] = ft(40 + eave, y));
       return;
     }
-    // no hints: walk round the house (up the left, across the front, up the right) in the saved order
-    const pts = [[L, T], [L, F], [R, F], [R, T]], seg = [], asp = 0.75;
-    for (let i = 0; i < 3; i++) seg.push(Math.hypot(pts[i + 1][0] - pts[i][0], (pts[i + 1][1] - pts[i][1]) * asp));
-    const total = seg.reduce((a, b) => a + b);
-    ls.forEach((l, i) => {
-      let d = total * (ls.length === 1 ? .5 : i / (ls.length - 1)), s = 0;
-      while (s < 2 && d > seg[s]) d -= seg[s++];
-      const k = seg[s] ? d / seg[s] : 0;
-      pos[l.key] = [pts[s][0] + (pts[s + 1][0] - pts[s][0]) * k, pts[s][1] + (pts[s + 1][1] - pts[s][1]) * k];
-    });
+    // no hints: walk round the eaves (left, front, right) in the saved order
+    const run = 67 + 40 + 67;
+    even(ls.length, 0, run).forEach((d, i) => pos[ls[i].key] = d < 67 ? ft(-eave, d) : d < 107 ? ft(d - 67, 67 + eave) : ft(40 + eave, 67 - (d - 107)));
   });
-  for (const k in pos) pos[k] = pos[k].map(v => +clamp(v, 0.03, 0.97).toFixed(4));
-  return {house, pos};
+  for (const k in pos) pos[k] = pos[k].map(v => +clamp(v, 0.02, 0.98).toFixed(4));
+  return {house: HOUSE, pos};
 }
 function planData() {
-  const sp = S.plan || {}, house = sp.house && sp.house.length === 4 ? sp.house : undefined, d = planDefault(house);
-  return {house: d.house, pos: {...d.pos, ...(sp.pos && !Array.isArray(sp.pos) ? sp.pos : {})}};
+  const sp = S.plan || {};
+  return {house: HOUSE, pos: {...planDefault().pos, ...(sp.pos && !Array.isArray(sp.pos) ? sp.pos : {})}};
 }
-function houseSvg([hx, hy, hw, hh]) {
-  const x = hx * 1000, y = hy * 750, w = hw * 1000, h = hh * 750, cx = x + w / 2, by = y + h, dw = Math.min(46, w / 4);
-  return `<rect class="wall" x="${x}" y="${y}" width="${w}" height="${h}"/>
-    <rect class="wall-in" x="${x + 9}" y="${y + 9}" width="${Math.max(0, w - 18)}" height="${Math.max(0, h - 18)}"/>
-    <rect class="cut" x="${cx - dw / 2}" y="${by - 10}" width="${dw}" height="12"/>
-    <path class="door" d="M${cx - dw / 2} ${by} V${by - dw}"/><path class="door arc" d="M${cx - dw / 2} ${by - dw} A${dw} ${dw} 0 0 1 ${cx + dw / 2} ${by}"/>`;
+function siteSvg() {
+  const P = (...pts) => pts.map(p => svgPt(...p).join(' ')).join(' L');
+  const [x0, y0] = svgPt(0, 0), [x1, y1] = svgPt(40, 67), front = 67, side = front + PLAN.walk; // sidewalk starts ~23 ft past the front eave
+  const [, sw0] = svgPt(0, side), [, sw1] = svgPt(0, side + 3), [, kerb] = svgPt(0, side + 4);
+  return `<rect class="lot" x="${svgPt(-22, 0)[0]}" y="${svgPt(0, -16)[1]}" width="${84 * FT}" height="${(side + 16 - 1) * FT}"/>
+    <path class="pave" d="M${P([0, front], [18, front], [18, side], [0, side])}Z"/>
+    <path class="pave" d="M${P([18, front], [31, front], [31, front + 12], [18, front + 12])}Z"/>
+    <line class="edge" x1="0" x2="${PLAN.W * FT}" y1="${sw0}" y2="${sw0}"/><line class="edge" x1="0" x2="${PLAN.W * FT}" y1="${sw1}" y2="${sw1}"/>
+    <rect class="road" x="0" y="${kerb}" width="${PLAN.W * FT}" height="${PLAN.H * FT - kerb}"/>
+    <rect class="wall" x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}"/>
+    <path class="roof" d="M${P([0, 0], [20, 19.6], [40, 0])} M${P([20, 19.6], [20, 47])} M${P([0, 67], [20, 47], [40, 67])}"/>
+    <path class="garage" d="M${P([1, 65.5], [16, 65.5])}"/>`;
 }
-// mode: 'home' (live looks, tap opens the light), 'paint' (scene editor), 'layout' (drag lights and house corners)
+const planTag = (x, y, text, cls = '') => { const [l, t] = ft(x, y); return `<span class="tag ${cls}" style="left:${l * 100}%;top:${t * 100}%">${esc(text)}</span>`; };
+// mode: 'home' (live looks, tap opens the light), 'paint' (scene editor), 'layout' (drag lights)
 function planView(mode) {
-  const pd = mode === 'layout' ? layout : planData(), [hx, hy, hw, hh] = pd.house;
+  const pd = mode === 'layout' ? layout : planData();
   const inScope = mode === 'paint' ? new Set(sceneLights().map(l => l.key)) : null;
   const laneOf = {}; if (mode === 'paint') editing.lanes.forEach((l, i) => l.lights.forEach(k => laneOf[k] = i));
   const fx = allKeyed().filter(l => pd.pos[l.key]).map(l => {
@@ -624,29 +642,25 @@ function planView(mode) {
   const backName = S.places.find(n => /back/i.test(n));
   const down = mode === 'paint' ? 'onpointerdown="paintStart(event)"' : mode === 'layout' ? 'onpointerdown="layoutDown(event)"' : '';
   return `<div class="plan ${mode} ${planNames ? 'names' : ''}" ${down}>
-    <svg class="plan-svg" viewBox="0 0 1000 750" preserveAspectRatio="none" aria-hidden="true">
-      <defs><pattern id="pg1" width="25" height="25" patternUnits="userSpaceOnUse"><path class="g1" d="M25 0H0V25"/></pattern>
-        <pattern id="pg2" width="125" height="125" patternUnits="userSpaceOnUse"><path class="g2" d="M125 0H0V125"/></pattern></defs>
-      <rect width="1000" height="750" fill="url(#pg1)"/><rect width="1000" height="750" fill="url(#pg2)"/>
-      <rect class="lot" x="18" y="16" width="964" height="672"/>
-      <line class="street" x1="0" x2="1000" y1="712" y2="712"/>
-      <g class="house">${houseSvg(pd.house)}</g>
+    <svg class="plan-svg" viewBox="0 0 ${PLAN.W * FT} ${PLAN.H * FT}" preserveAspectRatio="none" aria-hidden="true">
+      <defs><pattern id="pg1" width="50" height="50" patternUnits="userSpaceOnUse"><path class="g1" d="M50 0H0V50"/></pattern>
+        <pattern id="pg2" width="250" height="250" patternUnits="userSpaceOnUse" x="${PLAN.ox * FT % 250}" y="${PLAN.oy * FT % 250}"><path class="g2" d="M250 0H0V250"/></pattern></defs>
+      <rect width="100%" height="100%" fill="url(#pg1)"/><rect width="100%" height="100%" fill="url(#pg2)"/>
+      ${siteSvg()}
     </svg>
-    <span class="tag" data-tag="house" style="left:${(hx + hw / 2) * 100}%;top:${(hy + hh / 2) * 100}%">House</span>
-    <span class="tag" style="left:50%;top:97.6%">Street</span>
-    ${backName ? `<span class="tag l" style="left:3.5%;top:5.2%">${esc(backName)}</span>` : ''}
+    ${planTag(20, 33, 'House')}${planTag(20, 37.2, '40 × 67 ft', 'dim')}${planTag(8, 62.4, 'Garage', 'dim')}${planTag(9, 80, 'Driveway', 'dim')}
+    ${planTag(20, 96, 'Street')}${backName ? planTag(20, -13.5, backName) : ''}
     <div class="pools">${fx.map(f => f[0]).join('')}</div>
     ${fx.map(f => f[1]).join('')}
-    ${mode === 'layout' ? `<button class="hnd" data-h="tl" aria-label="House corner, top left" style="left:${hx * 100}%;top:${hy * 100}%"></button><button class="hnd" data-h="br" aria-label="House corner, bottom right" style="left:${(hx + hw) * 100}%;top:${(hy + hh) * 100}%"></button>` : ''}
   </div>`;
 }
 function toggleNames() { planNames = !planNames; store.set('planNames', planNames ? '1' : '0'); document.querySelectorAll('.plan').forEach(p => p.classList.toggle('names', planNames)); document.querySelectorAll('[data-names]').forEach(b => b.setAttribute('aria-pressed', planNames)); }
 const namesBtn = () => `<button class="link quiet" data-names aria-pressed="${planNames}" onclick="toggleNames()">${ic('type')}Names</button>`;
 
-// ---- layout editing: drag a light (or a house corner); arrows nudge the focused light
+// ---- layout editing: drag a light; arrows nudge the focused light
 function startLayout() { layout = JSON.parse(JSON.stringify(planData())); render(); }
 function cancelLayout() { layout = null; render(); }
-function autoLayout() { layout = planDefault(layout.house); render(); }
+function autoLayout() { layout = planDefault(); render(); }
 async function saveLayout(btn) {
   busy(btn, true);
   try { await api('plan_save', {plan: layout}); S.plan = layout; layout = null; toast('Layout saved'); render(); }
@@ -657,27 +671,14 @@ function placeFx(key, x, y) {
   layout.pos[key] = [+x.toFixed(4), +y.toFixed(4)];
   document.querySelectorAll(`.plan [data-k="${key}"]`).forEach(el => { el.style.left = x * 100 + '%'; el.style.top = y * 100 + '%'; });
 }
-function drawHouse() {
-  const [hx, hy, hw, hh] = layout.house, plan = $('.plan');
-  $('.house', plan).innerHTML = houseSvg(layout.house);
-  const tag = $('[data-tag=house]', plan); tag.style.left = (hx + hw / 2) * 100 + '%'; tag.style.top = (hy + hh / 2) * 100 + '%';
-  const [tl, br] = plan.querySelectorAll('.hnd');
-  tl.style.left = hx * 100 + '%'; tl.style.top = hy * 100 + '%'; br.style.left = (hx + hw) * 100 + '%'; br.style.top = (hy + hh) * 100 + '%';
-}
 function layoutDown(e) {
-  const t = e.target.closest('.fx, .hnd'); if (!t || e.button > 0) return;
+  const t = e.target.closest('.fx'); if (!t || e.button > 0) return;
   e.preventDefault(); t.focus({preventScroll: true});
-  const plan = e.currentTarget, r = plan.getBoundingClientRect(), key = t.dataset.k, h = t.dataset.h;
+  const plan = e.currentTarget, r = plan.getBoundingClientRect(), key = t.dataset.k;
   t.classList.add('drag');
   const move = ev => {
     if (ev.pointerId !== e.pointerId) return;
-    const x = clamp(snap((ev.clientX - r.left) / r.width, 0.0125), 0.02, 0.98), y = clamp(snap((ev.clientY - r.top) / r.height, 1 / 60), 0.02, 0.98);
-    if (key) return placeFx(key, x, y);
-    const [hx, hy, hw, hh] = layout.house;
-    layout.house = h === 'tl' ? [Math.min(x, hx + hw - 0.1), Math.min(y, hy + hh - 0.1), Math.max(0.1, hx + hw - x), Math.max(0.1, hy + hh - y)]
-                              : [hx, hy, Math.max(0.1, x - hx), Math.max(0.1, y - hy)];
-    layout.house = layout.house.map(v => +v.toFixed(4));
-    drawHouse();
+    placeFx(key, clamp(snap((ev.clientX - r.left) / r.width, 1 / PLAN.W), 0.02, 0.98), clamp(snap((ev.clientY - r.top) / r.height, 1 / PLAN.H), 0.02, 0.98)); // whole feet
   };
   const up = ev => {
     if (ev.pointerId !== e.pointerId) return;
@@ -690,7 +691,7 @@ function nudge(e, key) {
   const d = {ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1]}[e.key]; if (!d) return;
   e.preventDefault();
   const m = e.shiftKey ? 4 : 1, [x, y] = layout.pos[key];
-  placeFx(key, clamp(x + d[0] * 0.0125 * m, 0.02, 0.98), clamp(y + d[1] / 60 * m, 0.02, 0.98));
+  placeFx(key, clamp(x + d[0] / PLAN.W * m, 0.02, 0.98), clamp(y + d[1] / PLAN.H * m, 0.02, 0.98)); // 1 ft, Shift 4 ft
 }
 
 // ---- views
@@ -741,7 +742,7 @@ function chip(sc) {
 }
 const scenesHtml = () => S.scenes.map(chip).join('') + `<button class="chip add" onclick="newScene()">${ic('plus')}New scene</button>`;
 function planCap() {
-  if (layout) return `<span>Drag each light to its spot. Drag the amber corners to fit the house. Arrow keys nudge.</span>`;
+  if (layout) return `<span>Drag each light to its spot. It snaps to whole feet. Arrow keys nudge 1 ft.</span>`;
   const p = S.playing;
   if (p && p.id && p.phase === 'running') return `<i class="live"></i><span><b style="color:var(--fg-2)">${esc(p.name)}</b> is playing. The plan shows it as a simulation.</span>`;
   if (!S.plan) return `<span>Spots are guessed from the light names. Tap Edit layout to match your house.</span>`;
@@ -1034,7 +1035,7 @@ async function play(id, btn) { if (btn) busy(btn, true); try { await api('play',
 async function stop(btn) { busy(btn, true); try { await api('stop'); const r = await api('playing'); S.playing = r.playing; render(); if (!r.playing) load(); } finally {} }
 
 // ---- boot
-$('#app').innerHTML = `<header class="bar"><div class="bar-row"><h1>Lights</h1></div></header><main><h2>Plan</h2><div class="skel" style="aspect-ratio:4/3"></div><h2>Lights</h2><div class="grid"><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div></div></main>`;
+$('#app').innerHTML = `<header class="bar"><div class="bar-row"><h1>Lights</h1></div></header><main><h2>Plan</h2><div class="skel" style="aspect-ratio:87/116"></div><h2>Lights</h2><div class="grid"><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div></div></main>`;
 load().catch(e => { $('#app').innerHTML = `<main><div class="notice">Could not reach the lights service.<br><small>${esc(e.message)}</small><br><button class="link" onclick="boot()">Try again</button></div></main>`; });
 function boot() { $('#app').innerHTML = '<main><div class="skel" style="min-height:180px"></div></main>'; load().catch(e => toast('Still failing: ' + e.message, true)); }
 setInterval(() => { if (!editing && !reordering && !settling && !layout && !$('.sheet') && document.visibilityState === 'visible') load(); }, 30000);

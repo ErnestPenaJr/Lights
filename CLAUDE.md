@@ -21,12 +21,14 @@ The web server cannot write to this folder, so state lives in the PHP session on
   scenes are chips (play + edit), an "All lights" tile and one tile per light whose bottom strip is a range input
   (the brightness slider, filled in the light's color); tapping the tile's top opens the per-light bottom sheet.
   At >= 900px a left sidebar holds areas + scenes and the chips row hides. Scene editor (full view), presets.
-  **Plan**: a 2D blueprint of the whole property (4:3 box, positions 0..1, saved as `store.json` `plan` =
-  `{house:[x,y,w,h], pos:{key:[x,y]}}`; until saved, `planDefault` guesses from names: LS* left side, RS* right side,
-  the rest across the front, an area named "Back…" along the back fence). Home shows live colors and, while a scene
-  plays, a simulation; "Edit layout" drags lights and house corners. The scene editor paints colors on the plan and
-  previews the effect live. `simAt` in index.php mirrors run.php's timing (0.12 s per publish) and math
-  (`hd_mix_hex`, `hd_breathe_levels`): change both together.
+  **Plan**: a to-scale roof plan of the property from the user's satellite survey (Nov 2026): house 40 x 67 ft hip roof,
+  driveway 18 ft wide on the left front, sidewalk ~23 ft past the front eave, street at the bottom. `PLAN` in index.php:
+  box 87 x 116 ft, 10 SVG units per foot, feet origin = back-left house corner. Positions are 0..1 of the box, saved as
+  `store.json` `plan.pos` (`plan.house` is fixed now). Until saved, `planDefault` guesses from names: LS* left eave,
+  FL/FC/F/FR front eave, RS* right eave, an area named "Back…" as a row in the back yard. "Edit layout" drags lights
+  (snaps to 1 ft). The scene editor paints colors on the plan and previews the effect live. `simAt`/`fxTiming` in
+  index.php mirror run.php's step clock (`hd_fx_timing`, `HD_GAP`) and math (`hd_mix_hex`, `hd_breathe_levels`,
+  `hd_twinkle_pick`): change both together. run.json `t0` + the API's `now` keep the home plan in step with the yard.
   Design: "Operate" surface, dark slate palette (`--bg #0f172a`, `--surface #1e293b`),
   amber accent `#f59e0b` for the one primary action per screen, Plus Jakarta Sans (system fallback),
   inline Lucide-style SVG icons (no emoji), 44px touch targets, `prefers-reduced-motion` respected.
@@ -34,6 +36,9 @@ The web server cannot write to this folder, so state lives in the PHP session on
   To preview without the NAS: build a mock with a fake `fetch` (see session notes) and use `~/.claude/skills/gstack/browse/dist/browse` at 390x844.
   Design options go in one working mock page with a tab per option (the user clicks through them), never a design canvas.
 - `run.php` — pattern runner, a CLI PHP process started in the background by `play` (`nohup /usr/bin/php run.php &`).
+  It talks through `HdLink` (haodeng.php): one long-lived MQTT link per place that does not wait for the broker's
+  PUBACK (a 62 ms round trip, measured), keeps commands exactly `HD_GAP` (0.15 s) apart, pings when idle, and
+  reopens a dropped socket. Effect steps run on a fixed clock (step k at t0 + k*dt), so they never drift.
 - `store.php` — JSON store (`store.json`: names, scenes, light order, the plan, last lane layout; `run.json`: what is
   playing), the disk-cached cloud login (`cloud.ser`, 1 h), a short status cache, and the shared actions
   `cmd_job`, `scene_play`, `scene_stop`, `stop_runner` used by both api.php and hb.php.
@@ -107,7 +112,7 @@ there if more of the protocol is ever needed.
 ## Gotchas
 
 - The cloud drops ~15% of a burst at 10 commands/s, and the bridge stops answering status requests
-  for a few seconds after a long burst. Space commands (`sendMany` gap 0.12 s), send important
+  for a few seconds after a long burst. Space commands (`HD_GAP` 0.15 s send to send; before HdLink it was 0.12 s + the PUBACK wait, ~0.18 s), send important
   ones twice, and never send a status request right after a burst.
 - The web server (user `http`) cannot write to this share, so `store.php` falls back to the NAS temp
   dir (`/var/services/tmp/lights`). The page shows a banner until `lights/data` is made writable

@@ -39,4 +39,11 @@ check(hd_mix_hex('ff0000', '00ff00', 0.5) === 'ffff00'); // via yellow, not brow
 check(hd_mix_hex('ffffff', '000000', 0.5) === '808080'); // gray end: plain RGB mix
 check(hd_mix_hex('ff0000', '0000ff', 0.5) === 'ff00ff'); // shortest way: through magenta
 
+// pattern timing (index.php fxTiming mirrors it) and the twinkle hash (same bits as index.php mix32)
+check(hd_fx_timing('rotate', 0.5, 2, 1) == [0.5, 1] && hd_fx_timing('rotate', 0.5, 4, 2) == [4 * 2 * HD_GAP + 0.1, 1]);
+check(hd_fx_timing('fade', 3.65, 2, 1)[1] === 6 && hd_fx_timing('fade', 0.5, 4, 2) == [4 * 2 * HD_GAP + 0.15, 1]);
+check(hd_fx_timing('breathe', 3.65, 1, 1) == [2.5 * 3.65 / 24, 24]);
+check(array_map('hd_mix32', [0, 1, -1, 12345, 99999]) === [493009611, 1059954845, 4288662295, 472827831, 3815738572]);
+for ($c = 1; $c < 200; $c++) check(hd_twinkle_pick($c, 5) >= 0 && hd_twinkle_pick($c, 5) < 5);
+
 echo "ok\n";
