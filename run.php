@@ -119,8 +119,8 @@ for ($round = 0; $round < 3; $round++) {
 }
 run_progress($token, 'running', 100);
 $period = 0.5 + (10 - $scene['speed']) * 0.35; // seconds per step: 0.5 (fast) .. 3.65 (slow)
-$sleep = function (float $sec) use ($alive): bool { // sleep in small slices so stop is quick
-    for ($t = 0; $t < $sec; $t += 0.25) { if (!$alive()) return false; usleep(250000); }
+$sleep = function (float $sec) use ($alive): bool { // sleep in small slices so stop is quick; the last slice is exact
+    for ($t = 0; $t < $sec - 0.001; $t += 0.25) { if (!$alive()) return false; usleep((int)(min(0.25, $sec - $t) * 1e6)); }
     return $alive();
 };
 $sceneLights = []; foreach ($byPlace as $p => $laneAddrs) foreach ($laneAddrs as $addrs) foreach ($addrs as $a) $sceneLights[] = [$p, $a];
@@ -131,17 +131,27 @@ switch ($scene['effect']) {
     case 'blink':
         while ($sleep($period)) { $broadcast(hd_payload_off(HD_ALL, $ct)); if (!$sleep($period)) break; $broadcast(hd_payload_on(HD_ALL, $ct)); }
         break;
-    case 'breathe':
-        $levels = [100, 75, 50, 30, 15, 5, 15, 30, 50, 75];
-        for ($i = 0; $sleep($period / 4); $i++) $broadcast(hd_payload_brightness(HD_ALL, $ct, $levels[$i % 10]));
+    case 'breathe': // one breath = 2.5 steps; slow speeds get more, smaller steps (a smooth curve, never more than ~3 broadcasts/s)
+        $cycle = 2.5 * $period; $n = max(10, min(24, (int)round($cycle / 0.3)));
+        $levels = hd_breathe_levels($n);
+        for ($i = 0; $sleep($cycle / $n); $i++) $broadcast(hd_payload_brightness(HD_ALL, $ct, $levels[$i % $n]));
         break;
     case 'rotate': // each lane takes the next lane's color every step (alternating for 2 lanes, chase for more)
         for ($t = 1; $sleep($period); $t++) $paint(array_map(fn($i) => $colors[($i + $t) % $K], array_keys($lanes)));
         break;
+    case 'fade': // like rotate, but each lane glides to the next color in a few in-between steps (as many as the bridge allows)
+        $m = max(1, min(4, (int)floor($period / (0.12 * $K * count($byPlace) + 0.15))));
+        for ($t = 1; ; $t++) {
+            for ($s = 1; $s <= $m; $s++) {
+                if (!$sleep($period / $m)) break 2;
+                $paint(array_map(fn($i) => hd_mix_hex($colors[($i + $t - 1) % $K], $colors[($i + $t) % $K], $s / $m), array_keys($lanes)));
+            }
+        }
+        break;
     case 'twinkle': // a random light dips and comes back. The come-back goes twice, then once more a step later: a far light drops 1 in 3
         $prev = null;
         while ($sleep($period / 2)) {
-            [$p, $a] = $sceneLights[array_rand($sceneLights)];
+            do { [$p, $a] = $sceneLights[array_rand($sceneLights)]; } while (count($sceneLights) > 1 && $prev === [$p, $a]); // never the same light twice in a row
             if ($prev) $pub($prev[0], hd_payload_brightness($prev[1], $ct, 100));
             $pub($p, hd_payload_brightness($a, $ct, 5));
             if (!$sleep(max(0.3, $period / 3))) break;

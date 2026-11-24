@@ -14,13 +14,19 @@ The web server cannot write to this folder, so state lives in the PHP session on
 ## Files
 
 - `haodeng.php` — the whole cloud/mesh protocol, pure payload builders, hand-rolled MQTT client.
-- `api.php` — JSON API used by the page (`?a=state`, `?a=playing`, POST `cmd`, `identify`, `rename`, `scene_save`, `scene_delete`, `play`, `stop`).
+- `api.php` — JSON API used by the page (`?a=state`, `?a=playing`, POST `cmd`, `identify`, `rename`, `plan_save`, `scene_save`, `scene_delete`, `play`, `stop`).
   `state` and `playing` carry `jobs`: commands still being delivered by ensure.php. After a `cmd` the page paints the
   expected result at once, shows a "Changing the lights" bar, polls `playing` until `jobs` is 0, then reads status once.
 - `index.php` — the UI: one HTML file with inline CSS/JS. Home = "Tiles": the area name is a `<select>` title,
   scenes are chips (play + edit), an "All lights" tile and one tile per light whose bottom strip is a range input
   (the brightness slider, filled in the light's color); tapping the tile's top opens the per-light bottom sheet.
   At >= 900px a left sidebar holds areas + scenes and the chips row hides. Scene editor (full view), presets.
+  **Plan**: a 2D blueprint of the whole property (4:3 box, positions 0..1, saved as `store.json` `plan` =
+  `{house:[x,y,w,h], pos:{key:[x,y]}}`; until saved, `planDefault` guesses from names: LS* left side, RS* right side,
+  the rest across the front, an area named "Back…" along the back fence). Home shows live colors and, while a scene
+  plays, a simulation; "Edit layout" drags lights and house corners. The scene editor paints colors on the plan and
+  previews the effect live. `simAt` in index.php mirrors run.php's timing (0.12 s per publish) and math
+  (`hd_mix_hex`, `hd_breathe_levels`): change both together.
   Design: "Operate" surface, dark slate palette (`--bg #0f172a`, `--surface #1e293b`),
   amber accent `#f59e0b` for the one primary action per screen, Plus Jakarta Sans (system fallback),
   inline Lucide-style SVG icons (no emoji), 44px touch targets, `prefers-reduced-motion` respected.
@@ -28,7 +34,7 @@ The web server cannot write to this folder, so state lives in the PHP session on
   To preview without the NAS: build a mock with a fake `fetch` (see session notes) and use `~/.claude/skills/gstack/browse/dist/browse` at 390x844.
   Design options go in one working mock page with a tab per option (the user clicks through them), never a design canvas.
 - `run.php` — pattern runner, a CLI PHP process started in the background by `play` (`nohup /usr/bin/php run.php &`).
-- `store.php` — JSON store (`store.json`: names, scenes, light order, last lane layout; `run.json`: what is
+- `store.php` — JSON store (`store.json`: names, scenes, light order, the plan, last lane layout; `run.json`: what is
   playing), the disk-cached cloud login (`cloud.ser`, 1 h), a short status cache, and the shared actions
   `cmd_job`, `scene_play`, `scene_stop`, `stop_runner` used by both api.php and hb.php.
 - `ensure.php` — background delivery of one command (started by `cmd_job`): send twice, check status,
@@ -83,8 +89,9 @@ There is no PHP on the Mac. Run PHP through the NAS as above.
   paints every area each step). Old scenes stored bare addresses; both api.php and run.php still accept them. `run.php` puts each lane's
   lights into mesh group `0x80F0 + lane` (only when the layout changed since last play, stored in
   `store.json`), then animates with one command per lane (or one broadcast) per step. Effects:
-  static, blink (broadcast off/on), breathe (broadcast brightness ramp), rotate (lanes take the next
-  lane's color), twinkle (random light dips), rainbow (broadcast hue cycle). Stop = delete `run.json`,
+  static, blink (broadcast off/on), breathe (broadcast cosine brightness curve, 10-24 steps), rotate ("Chase": lanes take
+  the next lane's color), fade (like rotate, gliding in up to 4 in-between colors round the color wheel), twinkle
+  (random light dips, never the same twice in a row), rainbow (broadcast hue cycle). Stop = delete `run.json`,
   kill the pid, then start `run.php` again in `mode: reset`, which runs `hd_reset_place` per area in the
   background: broadcast white, then up to 4 rounds of status check + per-light re-send (the mesh drops
   ~1 in 6 commands; the bridge goes silent for a minute after a burst, so never flood it). Everyday look =

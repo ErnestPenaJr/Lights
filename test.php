@@ -31,4 +31,12 @@ check(hd_decode_status('01643F80') == ['on' => true, 'link' => true, 'bright' =>
 
 check(hd_hex_hs('ff0000') == [0, 100] && hd_hex_hs('00c000') == [120, 100] && hd_hex_hs('0040ff') == [225, 100] && hd_hex_hs('d2d2d2') == [0, 0]);
 
+// effects: breathe curve, color fade round the wheel
+$lv = hd_breathe_levels(10);
+check(count($lv) === 10 && $lv[0] === 100 && $lv[5] === 5 && $lv[1] === $lv[9] && min($lv) === 5);
+check(hd_mix_hex('ff0000', '00ff00', 0) === 'ff0000' && hd_mix_hex('ff0000', '00ff00', 1) === '00ff00');
+check(hd_mix_hex('ff0000', '00ff00', 0.5) === 'ffff00'); // via yellow, not brown
+check(hd_mix_hex('ffffff', '000000', 0.5) === '808080'); // gray end: plain RGB mix
+check(hd_mix_hex('ff0000', '0000ff', 0.5) === 'ff00ff'); // shortest way: through magenta
+
 echo "ok\n";

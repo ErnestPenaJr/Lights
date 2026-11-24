@@ -16,7 +16,7 @@ function store_permanent(): bool { return is_writable(__DIR__ . '/data'); }
 function store_load(): array {
     $f = store_dir() . '/store.json';
     $st = is_file($f) ? json_decode(file_get_contents($f), true) : null;
-    return ($st ?: []) + ['names' => [], 'scenes' => [], 'lanes' => [], 'order' => []];
+    return ($st ?: []) + ['names' => [], 'scenes' => [], 'lanes' => [], 'order' => [], 'plan' => []];
 }
 
 function store_save(array $st): void {

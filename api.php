@@ -57,7 +57,7 @@ function handle(string $a, array $in, HaoDeng $cloud, array $st, int $place, boo
             return ['places' => array_column($cloud->places, 'name'), 'place' => $both ? 'all' : $place, 'lights' => $lights, 'allLights' => $allLights,
                 'scenes' => array_values(array_filter($st['scenes'], fn($s) => $both || ($s['scope'] ?? 'place') === 'all' || (int)$s['place'] === $place)),
                 'playing' => $run && ($both || in_array($place, $run['places'] ?? [(int)$run['place']])) ? $run : null,
-                'permanent' => store_permanent(), 'statusError' => $statusError, 'jobs' => jobs_pending()];
+                'plan' => $st['plan'] ?: null, 'permanent' => store_permanent(), 'statusError' => $statusError, 'jobs' => jobs_pending()];
 
         case 'playing': // cheap poll while a scene starts or a reset runs (no status request to the bridges)
             $run = run_load();
@@ -94,6 +94,16 @@ function handle(string $a, array $in, HaoDeng $cloud, array $st, int $place, boo
             store_save($st);
             return ['ok' => true];
 
+        case 'plan_save': // the 2D plan: house box [x, y, w, h] and one [x, y] per light key, all 0..1 of the plan
+            $pl = $in['plan'] ?? [];
+            $f = fn($v) => round(max(0, min(1, (float)$v)), 4);
+            $house = array_map($f, array_slice(array_values((array)($pl['house'] ?? [])), 0, 4));
+            $pos = [];
+            foreach ((array)($pl['pos'] ?? []) as $k => $xy) if (preg_match('/^\d+-\d+$/', (string)$k) && is_array($xy) && count($xy) >= 2) $pos[$k] = [$f($xy[0]), $f($xy[1])];
+            $st['plan'] = ['house' => count($house) === 4 ? $house : null, 'pos' => $pos];
+            store_save($st);
+            return ['ok' => true];
+
         case 'scene_save':
             $sc = $in['scene'] ?? [];
             $id = preg_replace('/[^a-z0-9]/', '', strtolower($sc['id'] ?? '')) ?: substr(bin2hex(random_bytes(4)), 0, 8);
@@ -109,7 +119,7 @@ function handle(string $a, array $in, HaoDeng $cloud, array $st, int $place, boo
             }
             $st['scenes'][$id] = ['id' => $id, 'place' => $place, 'scope' => ($sc['scope'] ?? 'place') === 'all' ? 'all' : 'place',
                 'name' => mb_substr(trim($sc['name'] ?? 'Scene'), 0, 40) ?: 'Scene',
-                'effect' => in_array($sc['effect'] ?? '', ['static', 'blink', 'breathe', 'rotate', 'twinkle', 'rainbow']) ? $sc['effect'] : 'static',
+                'effect' => in_array($sc['effect'] ?? '', ['static', 'blink', 'breathe', 'rotate', 'fade', 'twinkle', 'rainbow']) ? $sc['effect'] : 'static',
                 'speed' => max(1, min(10, (int)($sc['speed'] ?? 5))), 'lanes' => array_slice($lanes, 0, 8)];
             store_save($st);
             return ['ok' => true, 'id' => $id];

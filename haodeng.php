@@ -62,6 +62,34 @@ function hd_hex_hs(string $rrggbb): array {
     return [(int)round(fmod($h * 60 + 360, 360)), (int)round($d / $max * 100)];
 }
 
+/** Brightness levels for one breathe cycle of $n steps: a smooth cosine from 100% down to 5% and back. */
+function hd_breathe_levels(int $n): array {
+    $n = max(2, $n);
+    return array_map(fn($i) => (int)round(5 + 95 * (1 + cos(2 * M_PI * $i / $n)) / 2), range(0, $n - 1));
+}
+
+/** Color $t (0..1) of the way from $a to $b. Saturated colors travel round the color wheel (red to green passes
+ *  yellow, not a dim brown); a white or gray end mixes plain RGB. The page's preview uses the same math. */
+function hd_mix_hex(string $a, string $b, float $t): string {
+    $t = max(0.0, min(1.0, $t));
+    $rgb = fn(string $h) => array_map(fn($x) => hexdec($x) / 255, str_split(substr(ltrim($h, '#'), 0, 6), 2));
+    [$ca, $cb] = [$rgb($a), $rgb($b)];
+    $hsv = function (array $c): array {
+        [$r, $g, $b] = $c; $max = max($c); $d = $max - min($c);
+        $h = $d == 0 ? 0 : ($max == $r ? fmod(($g - $b) / $d + 6, 6) : ($max == $g ? ($b - $r) / $d + 2 : ($r - $g) / $d + 4)) * 60;
+        return [$h, $max ? $d / $max : 0, $max];
+    };
+    [$ha, $sa, $va] = $hsv($ca); [$hb, $sb, $vb] = $hsv($cb);
+    if ($sa < 0.15 || $sb < 0.15) $out = array_map(fn($x, $y) => $x + ($y - $x) * $t, $ca, $cb);
+    else {
+        $dh = fmod($hb - $ha + 540, 360) - 180; // shortest way round
+        $h = fmod($ha + $dh * $t + 360, 360) / 60; $s = $sa + ($sb - $sa) * $t; $v = $va + ($vb - $va) * $t;
+        $f = $h - floor($h); [$p, $q, $u] = [$v * (1 - $s), $v * (1 - $s * $f), $v * (1 - $s * (1 - $f))];
+        $out = [[$v, $u, $p], [$q, $v, $p], [$p, $v, $u], [$p, $q, $v], [$u, $p, $v], [$v, $p, $q]][(int)floor($h) % 6];
+    }
+    return implode('', array_map(fn($x) => sprintf('%02x', (int)round($x * 255)), $out));
+}
+
 // ---- minimal MQTT 3.1.1: CONNECT, one PUBLISH (qos 1), DISCONNECT ----
 
 function mqtt_str(string $s): string { return pack('n', strlen($s)) . $s; }
