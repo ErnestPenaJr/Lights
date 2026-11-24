@@ -138,6 +138,19 @@ function mqtt_read_packet($s): ?array {
     return [ord($h), $body];
 }
 
+/** Take one complete packet off the front of $buf: [type byte, body], or null when it is not all there yet. */
+function mqtt_take_packet(string &$buf): ?array {
+    $len = 0; $mult = 1; $i = 1;
+    do {
+        if (!isset($buf[$i])) return null;
+        $b = ord($buf[$i++]); $len += ($b & 0x7F) * $mult; $mult *= 128;
+    } while ($b & 0x80);
+    if (strlen($buf) < $i + $len) return null;
+    $pkt = [ord($buf[0]), substr($buf, $i, $len)];
+    $buf = (string)substr($buf, $i + $len);
+    return $pkt;
+}
+
 function mqtt_publish_once(string $host, string $user, string $pass, string $topic, string $payload): void {
     $s = mqtt_open($host, $user, $pass);
     fwrite($s, mqtt_publish_packet($topic, $payload));
@@ -184,6 +197,9 @@ class HdLink {
     private string $topic = '';
     private int $id = 0;
     private float $next = 0, $last = 0;
+    private string $buf = '';
+    private ?string $sub = null;
+    private $onMsg = null;
     public int $sent = 0, $reconnects = 0;
 
     public function __construct(private HaoDeng $cloud, private int $place, private float $gap = HD_GAP) { $this->connect(); }
@@ -195,6 +211,8 @@ class HdLink {
                 [$this->s, $this->topic] = $this->cloud->open($this->place);
                 stream_set_blocking($this->s, false);
                 $this->last = microtime(true);
+                $this->buf = '';
+                if ($this->sub) $this->write(mqtt_packet(0x82, pack('n', 1) . mqtt_str($this->sub) . chr(0)));
                 return;
             } catch (Throwable $e) {
                 if ($try >= 4) throw $e;
@@ -214,10 +232,27 @@ class HdLink {
         return $pkt === '';
     }
 
-    /** Read and drop what the broker sent (PUBACKs, ping replies). Returns false when the socket is closed. */
+    /** Hear the lights: subscribe to the bridge's status topic. Each light reports by itself when it changes,
+     *  so $onMsg gets the JSON text [{"a": addr, "d": "XXYYZZWW"}, ...] without asking. */
+    public function listen(callable $onMsg): void {
+        $hw = $this->cloud->places[$this->place]['hardware'];
+        $this->sub = "/{$hw['productKey']}/{$hw['deviceName']}/subStatus";
+        $this->onMsg = $onMsg;
+        $this->write(mqtt_packet(0x82, pack('n', 1) . mqtt_str($this->sub) . chr(0)));
+    }
+
+    /** Read what the broker sent: hand status messages to the listener, drop the rest (PUBACKs, ping replies).
+     *  Returns false when the socket is closed. */
     private function drain(): bool {
         if (!is_resource($this->s)) return false;
-        while (($b = @fread($this->s, 8192)) !== false && $b !== '') {}
+        while (($b = @fread($this->s, 8192)) !== false && $b !== '') $this->buf .= $b;
+        while (($pkt = mqtt_take_packet($this->buf)) !== null) {
+            [$type, $body] = $pkt;
+            if ($type >> 4 !== 3 || !$this->onMsg || strlen($body) < 2) continue;
+            $pos = 2 + unpack('n', $body)[1];
+            if (($type >> 1) & 3) { $this->write("\x40\x02" . substr($body, $pos, 2)); $pos += 2; }
+            ($this->onMsg)(substr($body, $pos));
+        }
         return !feof($this->s);
     }
 

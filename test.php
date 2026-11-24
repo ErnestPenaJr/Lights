@@ -46,4 +46,10 @@ check(hd_fx_timing('breathe', 3.65, 1, 1) == [2.5 * 3.65 / 24, 24]);
 check(array_map('hd_mix32', [0, 1, -1, 12345, 99999]) === [493009611, 1059954845, 4288662295, 472827831, 3815738572]);
 for ($c = 1; $c < 200; $c++) check(hd_twinkle_pick($c, 5) >= 0 && hd_twinkle_pick($c, 5) < 5);
 
+// packet splitter: whole packets only, the rest waits in the buffer
+$buf = mqtt_publish_packet('t', 'x', 1) . "\xD0\x00" . "\x30\x05";
+check(mqtt_take_packet($buf) === [0x32, "\x00\x01t\x00\x01x"] && mqtt_take_packet($buf) === [0xD0, ''] && mqtt_take_packet($buf) === null && $buf === "\x30\x05");
+$buf = mqtt_packet(0x30, str_repeat('a', 200)); $one = mqtt_take_packet($buf);
+check($one[0] === 0x30 && strlen($one[1]) === 200 && $buf === '');
+
 echo "ok\n";

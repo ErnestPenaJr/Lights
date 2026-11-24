@@ -39,6 +39,14 @@ The web server cannot write to this folder, so state lives in the PHP session on
   It talks through `HdLink` (haodeng.php): one long-lived MQTT link per place that does not wait for the broker's
   PUBACK (a 62 ms round trip, measured), keeps commands exactly `HD_GAP` (0.15 s) apart, pings when idle, and
   reopens a dropped socket. Effect steps run on a fixed clock (step k at t0 + k*dt), so they never drift.
+  The link also subscribes to the bridge's `subStatus` topic: lights report each change by themselves (no request needed).
+  For rotate/fade the runner flags a light that reported no change for 3 s + 2 steps while its lane changed, re-sends its
+  color directly and re-joins it to its lane group (out of the other lane groups): at most one light per step, a light
+  that ignores 3 tries only every 2 min. Log: `data/repairs.log`; per-light health every 30 s: `data/heard.json`.
+  Only ONE connection seems to get each status report: a second listener (a test script, a page status check) steals
+  reports and causes harmless false repairs. Measured 2026-11-24 (Christmas, 49 steps): most lights 45-50 changes,
+  FR-14 37, RS-16/17/18 10-12 (weak mesh reach at the back-right; before the fix RS-16 and RS-18 never changed).
+  The bridge also answers for mesh address 3 in Front & Sides, which is not in the cloud device list (white, never in a scene).
 - `store.php` — JSON store (`store.json`: names, scenes, light order, the plan, last lane layout; `run.json`: what is
   playing), the disk-cached cloud login (`cloud.ser`, 1 h), a short status cache, and the shared actions
   `cmd_job`, `scene_play`, `scene_stop`, `stop_runner` used by both api.php and hb.php.
